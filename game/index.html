@@ -3,17 +3,119 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Block Dodger</title>
+<title>Solmar Bay — Open-World Crime Game</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #11141b; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1026; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  /* Read aloud, never shown: the status line screen readers announce. */
   #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #damage-flash { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(220,30,30,0.55) 100%); opacity: 0; transition: opacity 0.25s; z-index: 5; }
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+  #hud.hidden { display: none; }
+  #hud-left { position: absolute; top: 14px; left: 14px; }
+  #minimap { width: 200px; height: 200px; border: 2px solid rgba(255,255,255,0.55); border-radius: 8px; background: #20242c; box-shadow: 0 2px 12px rgba(0,0,0,0.5); }
+  #mission-box { margin-top: 8px; max-width: 300px; background: rgba(10,14,24,0.72); border-left: 4px solid #facc15; border-radius: 6px; padding: 8px 10px; }
+  #mission-title { font-weight: 700; font-size: 14px; letter-spacing: 0.4px; }
+  #objective { font-size: 12.5px; line-height: 1.45; color: #e5e7eb; margin-top: 3px; }
+  #hud-right { position: absolute; top: 14px; right: 14px; text-align: right; }
+  #money { font-size: 26px; font-weight: 800; color: #7ee787; }
+  #clock { font-size: 15px; font-weight: 600; margin-top: 2px; }
+  #btn-mute { pointer-events: auto; margin-top: 8px; background: rgba(10,14,24,0.72); color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 6px; padding: 5px 10px; font-size: 12.5px; cursor: pointer; }
+  #hud-bottom { position: absolute; left: 14px; bottom: 14px; }
+  #stars { font-size: 26px; letter-spacing: 3px; color: #9ca3af; }
+  #stars.hot { color: #facc15; }
+  #health-bar { width: 220px; height: 12px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; overflow: hidden; margin-top: 4px; }
+  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #22c55e, #86efac); transition: width 0.2s; }
+  #ammo { font-size: 15px; font-weight: 700; margin-top: 6px; }
+  #speed { font-size: 22px; font-weight: 800; margin-top: 2px; }
+  #hint { position: absolute; bottom: 14px; right: 14px; font-size: 12px; color: rgba(255,255,255,0.75); text-align: right; line-height: 1.6; }
+  /* ---------- banners / toasts ---------- */
+  #banner { position: absolute; top: 22%; left: 50%; transform: translateX(-50%) scale(0.94); text-align: center; opacity: 0; transition: opacity 0.3s, transform 0.3s; }
+  #banner.show { opacity: 1; transform: translateX(-50%) scale(1); }
+  #banner-title { font-size: 44px; font-weight: 900; letter-spacing: 2px; color: #facc15; }
+  #banner-sub { font-size: 16px; margin-top: 6px; color: #f3f4f6; }
+  #toast { position: absolute; bottom: 96px; left: 50%; transform: translateX(-50%); background: rgba(10,14,24,0.8); border-radius: 6px; padding: 8px 16px; font-size: 14px; opacity: 0; transition: opacity 0.3s; white-space: nowrap; }
+  #toast.show { opacity: 1; }
+  /* ---------- screens ---------- */
+  .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 20; color: #fff; text-align: center; background: linear-gradient(180deg, rgba(5,8,20,0.55) 0%, rgba(5,8,20,0.78) 100%); }
+  .screen.show { display: flex; }
+  .logo { font-size: 72px; font-weight: 900; letter-spacing: 6px; background: linear-gradient(90deg, #ff2e88, #facc15, #22d3ee); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; }
+  .tagline { font-size: 18px; margin-top: 6px; color: #e5e7eb; }
+  .story { max-width: 560px; font-size: 14.5px; line-height: 1.65; color: #d1d5db; margin: 18px 0 6px; }
+  .menu-btn { pointer-events: auto; display: block; width: 260px; margin: 8px auto 0; padding: 12px 0; font-size: 16px; font-weight: 700; color: #111827; background: #facc15; border: none; border-radius: 8px; cursor: pointer; }
+  .menu-btn.secondary { background: rgba(255,255,255,0.16); color: #fff; border: 1px solid rgba(255,255,255,0.45); }
+  .menu-btn:disabled { opacity: 0.45; cursor: default; }
+  .controls { font-size: 13px; line-height: 1.9; color: #d1d5db; margin-top: 16px; }
+  #help-panel { display: none; max-width: 520px; background: rgba(10,14,24,0.9); border: 1px solid rgba(255,255,255,0.3); border-radius: 10px; padding: 18px 22px; margin-top: 14px; text-align: left; font-size: 13.5px; line-height: 1.8; }
+  #help-panel.show { display: block; }
+  #end-title { font-size: 64px; font-weight: 900; letter-spacing: 4px; color: #ef4444; }
+  #end-sub { font-size: 16px; margin-top: 8px; color: #e5e7eb; }
 </style>
 </head>
 <body>
-<canvas id="game" aria-label="Block Dodger: move the paddle left and right to dodge falling blocks and catch coins"></canvas>
+<canvas id="game" aria-label="Solmar Bay: an open-world crime game. Walk with WASD, drive with WASD, E enters cars, F punches, mouse aims and shoots."></canvas>
 <p id="status" role="status" aria-live="polite"></p>
+<div id="damage-flash"></div>
+
+<div id="hud">
+  <div id="hud-left">
+    <canvas id="minimap" width="200" height="200"></canvas>
+    <div id="mission-box">
+      <div id="mission-title">Free Roam</div>
+      <div id="objective">Explore Solmar Bay.</div>
+    </div>
+  </div>
+  <div id="hud-right">
+    <div id="money">$500</div>
+    <div id="clock">10:00</div>
+    <button id="btn-mute">🔊 Sound: On</button>
+  </div>
+  <div id="hud-bottom">
+    <div id="stars">☆☆☆☆☆</div>
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="ammo">🔫 12/48</div>
+    <div id="speed"></div>
+  </div>
+  <div id="hint">WASD move / drive · Mouse look<br>E enter car · F punch · Click shoot · R reload<br>Esc pause · M mute</div>
+  <div id="banner"><div id="banner-title"></div><div id="banner-sub"></div></div>
+  <div id="toast"></div>
+</div>
+
+<div id="screen-title" class="screen show">
+  <div class="logo">SOLMAR BAY</div>
+  <div class="tagline">A sun-soaked open-world crime game</div>
+  <div class="story">Mara Voss came back to Solmar Bay with $500 and a grudge. Steal cars, outrun the
+  Solmar Bay PD, run six jobs for the crew — and own the city that owes her everything.
+  An original game: its own city, characters, story, art, sound and music.</div>
+  <button class="menu-btn" id="btn-new">▶&nbsp; New Game</button>
+  <button class="menu-btn secondary" id="btn-continue">Continue</button>
+  <button class="menu-btn secondary" id="btn-help">How to Play</button>
+  <div id="help-panel">
+    <b>On foot:</b> WASD move · Shift run · Mouse look (click to lock) · E enter nearest car ·
+    F punch · Click shoot pistol · R reload<br>
+    <b>Driving:</b> W accelerate · S brake / reverse · A/D steer · Space handbrake · E get out<br>
+    <b>World:</b> Steal cars, dodge traffic, collect 20 hidden gold packages (+$100 each),
+    drive a taxi for fares. Wanted stars bring the police — break line of sight to cool off.
+    Getting busted or wasted costs $300 and restarts the current job.<br>
+    <b>Save:</b> progress auto-saves after every mission; Continue resumes it.
+    <br><button class="menu-btn secondary" id="btn-help-back" style="width:160px">Close</button>
+  </div>
+  <div class="controls">WASD move &amp; drive · E enter car · F punch · Click shoot · R reload · Esc pause</div>
+</div>
+
+<div id="screen-pause" class="screen">
+  <div id="pause-title" style="font-size:48px;font-weight:900;letter-spacing:3px">PAUSED</div>
+  <div class="tagline">Solmar Bay waits for no one. Except now.</div>
+  <button class="menu-btn" id="btn-resume">Resume</button>
+  <button class="menu-btn secondary" id="btn-restart">Restart Story</button>
+</div>
+
+<div id="screen-end" class="screen">
+  <div id="end-title">WASTED</div>
+  <div id="end-sub"></div>
+  <div class="tagline">Respawning at the plaza clinic…</div>
+</div>
+
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

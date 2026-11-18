@@ -1,134 +1,81 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s steps
-// (several in a slow frame, none in a fast one), and the renderer paints what is there. The game
-// moves between four screens: title, play, paused and game over.
-//
-// ?seed=N fixes the falling pattern. ?shot=start|play|end (with &seed=N) stages that scene
-// instead of running the loop, paints it twice and sets window.__shotReady for a screenshot.
-import { BEST_KEY, LIVES, STEP } from './config.js';
-import { createRandom } from './random.js';
-import { createWorld, EVENT_HIT, EVENT_OVER } from './world.js';
-import { ACTION_CONFIRM, ACTION_PAUSE, createInput } from './input.js';
-import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Boot: build the game, wire the screens' buttons, and either run the loop
+// or stage one screenshot scene (?shot=chase|plaza|mission|night&seed=N).
+// In shot mode the scene is painted and window.__solmarReady is set, so a
+// screenshot script knows the frame is real and ready.
+import { createGame } from './game.js';
 import { stageShot } from './shots.js';
-
-/** The longest frame the loop catches up on; a longer stall (a hidden tab) is dropped, not replayed. */
-const MAX_FRAME = 0.25;
+import { loadSave } from './save.js';
 
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
 const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
+const seed = Number.isInteger(seedParam) ? seedParam : 1;
 
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
-const world = createWorld(createRandom(seed));
-const renderer = createRenderer(canvas);
+const game = createGame(canvas, { seed, shot: shot || undefined, document });
+window.__solmar = game;
 
-function readBest() {
-  try {
-    return Number.parseInt(window.localStorage.getItem(BEST_KEY) ?? '0', 10) || 0;
-  } catch {
-    return 0;
-  }
+function announce(message) {
+  if (status) status.textContent = message;
 }
 
-function saveBest(value) {
-  try {
-    window.localStorage.setItem(BEST_KEY, String(value));
-  } catch {
-    // Storage can be off (private windows): the best score then lasts this visit only.
-  }
-}
-
-function runShot(name) {
-  const scene = stageShot(name, world);
-  let painted = 0;
-  function paint() {
-    renderer.draw(world.state, scene.screen, scene.best);
-    painted += 1;
-    if (painted < 2) requestAnimationFrame(paint);
-    else window.__shotReady = true;
-  }
-  requestAnimationFrame(paint);
-}
-
-function runGame() {
-  const input = createInput(canvas);
-  let screen = SCREEN_TITLE;
-  let best = readBest();
-  let accumulator = 0;
-  let last = performance.now();
-
-  // Screen readers (and anyone watching the page's text) hear the screen changes and each hit.
-  function announce(message) {
-    status.textContent = message;
-  }
-
-  function startGame() {
-    world.reset();
-    accumulator = 0;
-    screen = SCREEN_PLAY;
-    announce(`Playing. ${LIVES} lives.`);
-  }
-
-  function endGame() {
-    screen = SCREEN_OVER;
-    if (world.state.score > best) {
-      best = world.state.score;
-      saveBest(best);
-    }
-    announce(`Game over. Score ${world.state.score}. Best ${best}.`);
-  }
-
-  function handleActions() {
-    const actions = input.takeActions();
-    if (actions & ACTION_CONFIRM && (screen === SCREEN_TITLE || screen === SCREEN_OVER)) startGame();
-    else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    } else if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && screen === SCREEN_PAUSED) {
-      screen = SCREEN_PLAY;
-      announce('Playing.');
-    }
-  }
-
-  function step() {
-    if (screen === SCREEN_TITLE) {
-      world.step(STEP, 0, true);
-      return;
-    }
-    const events = world.step(STEP, input.direction(), false);
-    if (events & EVENT_OVER) endGame();
-    else if (events & EVENT_HIT) announce(world.state.lives === 1 ? 'Hit. 1 life left.' : `Hit. ${world.state.lives} lives left.`);
-  }
-
-  function frame(now) {
-    requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
-    last = now;
-    handleActions();
-    if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
-      while (accumulator >= STEP && (screen === SCREEN_TITLE || screen === SCREEN_PLAY)) {
-        step();
-        accumulator -= STEP;
-      }
-    } else {
-      accumulator = 0;
-    }
-    renderer.draw(world.state, screen, best);
-  }
-
-  // Leaving the tab pauses a running game rather than letting blocks fall unseen.
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    }
+function bindButtons() {
+  const newGame = document.getElementById('btn-new');
+  const cont = document.getElementById('btn-continue');
+  const resume = document.getElementById('btn-resume');
+  const restart = document.getElementById('btn-restart');
+  const mute = document.getElementById('btn-mute');
+  const help = document.getElementById('btn-help');
+  const helpBack = document.getElementById('btn-help-back');
+  const helpPanel = document.getElementById('help-panel');
+  if (newGame) newGame.addEventListener('click', () => game.startGame(true));
+  if (cont) cont.addEventListener('click', () => game.startGame(false));
+  if (resume) resume.addEventListener('click', () => {
+    game.state.screen = 'playing';
+    game.hud.setScreen('playing');
   });
-
-  announce('Block Dodger. Press Space or click to start.');
-  requestAnimationFrame(frame);
+  if (restart) restart.addEventListener('click', () => game.startGame(true));
+  if (mute) {
+    mute.addEventListener('click', () => {
+      const muted = !game.audio.isMuted();
+      game.audio.setMuted(muted);
+      game.state.muted = muted;
+      mute.textContent = muted ? '🔇 Sound: Off' : '🔊 Sound: On';
+    });
+  }
+  if (help && helpPanel) {
+    help.addEventListener('click', () => helpPanel.classList.add('show'));
+  }
+  if (helpBack && helpPanel) {
+    helpBack.addEventListener('click', () => helpPanel.classList.remove('show'));
+  }
+  canvas.addEventListener('click', () => {
+    if (game.state.screen === 'playing') game.audio.start();
+  });
 }
 
-if (shot) runShot(shot);
-else runGame();
+if (shot) {
+  const scene = stageShot(shot, game);
+  game.run();
+  // Let the loop paint a few frames (traffic settles, the beacon pulses),
+  // then tell the screenshot script the frame is ready.
+  let painted = 0;
+  function waitPaint() {
+    painted += 1;
+    if (painted >= 4) {
+      window.__solmarReady = true;
+      window.__solmarShot = scene;
+    } else {
+      requestAnimationFrame(waitPaint);
+    }
+  }
+  requestAnimationFrame(waitPaint);
+  announce(`Solmar Bay screenshot scene: ${scene.name}.`);
+} else {
+  bindButtons();
+  const cont = document.getElementById('btn-continue');
+  if (cont && !loadSave()) cont.disabled = true;
+  game.run();
+  announce('Solmar Bay. A sun-soaked open-world crime game. Press New Game to start.');
+}
