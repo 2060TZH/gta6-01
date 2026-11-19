@@ -17,3 +17,9 @@ export function pick(random, list) {
 export function range(random, min, max) {
   return min + random() * (max - min);
 }
+
+/** Clamp a value into [min, max]; NaN falls through to min so a bad number can never escape. */
+export function clamp(value, min, max) {
+  if (!Number.isFinite(value)) return min;
+  return value < min ? min : value > max ? max : value;
+}

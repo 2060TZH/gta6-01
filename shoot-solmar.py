@@ -8,6 +8,7 @@ screenshots it as JPEG into screenshots/. Prints each scene's snapshot state
 and any page errors, so a bad scene is visible before submitting.
 """
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -16,12 +17,18 @@ REPO = Path(__file__).resolve().parent
 
 from patchright.sync_api import sync_playwright  # noqa: E402
 
+# patchright 1.64 wants a newer shell than the cache has; the cached
+# headless shell (1228) is the one v1's scripts ran against.
+CHROME_HEADLESS_SHELL = os.path.expanduser(
+    "~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell"
+)
+
 
 def main() -> int:
     shots = json.loads((REPO / "shots.json").read_text())
     (REPO / "screenshots").mkdir(exist_ok=True)
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = p.chromium.launch(executable_path=CHROME_HEADLESS_SHELL)
         page = browser.new_page(viewport={"width": 1280, "height": 720})
         page.set_default_timeout(120000)
         errors = []
@@ -45,6 +52,9 @@ def main() -> int:
             state = page.evaluate("() => window.__solmar.snapshot()")
             print(f"{shot['name']}: {json.dumps(state)} ({time.time() - started:.1f}s)")
             page.screenshot(path=str(REPO / "screenshots" / shot["name"]), type="jpeg", quality=85)
+            size = (REPO / "screenshots" / shot["name"]).stat().st_size
+            flag = "OK" if size <= 262144 else "OVER 256 KiB!"
+            print(f"  {shot.get('caption', '')} — {size} bytes [{flag}]")
         print("PAGE ERRORS:", errors if errors else "none")
         browser.close()
     return 0

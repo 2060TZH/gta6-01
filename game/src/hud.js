@@ -1,6 +1,6 @@
 // The HUD: DOM stats, banners and the canvas minimap (roads, beach, player,
 // mission target, police, traffic and packages), all drawn every frame.
-import { CITY } from './config.js';
+import { CITY, PACKAGE_COUNT } from './config.js';
 
 export function createHud(documentRef) {
   const $ = (id) => documentRef.getElementById(id);
@@ -15,11 +15,15 @@ export function createHud(documentRef) {
     clock: $('clock'),
     objective: $('objective'),
     missionTitle: $('mission-title'),
+    missionMeta: $('mission-meta'),
+    packages: $('packages'),
+    taxi: $('taxi'),
     banner: $('banner'),
     bannerTitle: $('banner-title'),
     bannerSub: $('banner-sub'),
     toast: $('toast'),
     hint: $('hint'),
+    saveNote: $('save-note'),
     titleScreen: $('screen-title'),
     pauseScreen: $('screen-pause'),
     endScreen: $('screen-end'),
@@ -29,6 +33,7 @@ export function createHud(documentRef) {
   const mapCtx = els.minimap ? els.minimap.getContext('2d') : null;
   let bannerTimer = null;
   let toastTimer = null;
+  let saveTimer = null;
 
   function showBanner(title, sub) {
     if (!els.banner) return;
@@ -36,7 +41,7 @@ export function createHud(documentRef) {
     els.bannerSub.textContent = sub || '';
     els.banner.classList.add('show');
     clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(() => els.banner.classList.remove('show'), 3000);
+    bannerTimer = setTimeout(() => els.banner.classList.remove('show'), 3600);
   }
 
   function showToast(text) {
@@ -45,6 +50,14 @@ export function createHud(documentRef) {
     els.toast.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => els.toast.classList.remove('show'), 2600);
+  }
+
+  /** Brief "Saved ✓" note after an autosave, so the player trusts Continue. */
+  function showSaved() {
+    if (!els.saveNote) return;
+    els.saveNote.classList.add('show');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => els.saveNote.classList.remove('show'), 1400);
   }
 
   function setScreen(name) {
@@ -133,12 +146,24 @@ export function createHud(documentRef) {
     mapCtx.restore();
   }
 
+  function formatTimer(seconds) {
+    if (!seconds || seconds <= 0) return '';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
   function update(state) {
-    if (els.healthFill) els.healthFill.style.width = `${Math.max(0, state.health)}%`;
+    if (els.healthFill) {
+      els.healthFill.style.width = `${Math.max(0, state.health)}%`;
+      els.healthFill.classList.toggle('low', state.health <= 25);
+    }
     if (els.money) els.money.textContent = `$${Math.floor(state.money).toLocaleString('en-US')}`;
     if (els.stars) {
       els.stars.textContent = '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted);
       els.stars.classList.toggle('hot', state.wanted > 0);
+      // Flash the stars while a foot cop is about to bust the player.
+      els.stars.classList.toggle('busting', (state.bustProgress || 0) > 0.15);
     }
     if (els.ammo) els.ammo.textContent = state.inCar ? '—' : `🔫 ${state.ammo}/${state.mag}`;
     if (els.speed) els.speed.textContent = state.inCar ? `${Math.round(state.speedKmh)} km/h` : '';
@@ -149,8 +174,24 @@ export function createHud(documentRef) {
     }
     if (els.missionTitle) els.missionTitle.textContent = state.missionTitle || 'Free Roam';
     if (els.objective) els.objective.textContent = state.objective || 'Explore Solmar Bay. Press M for the next mission.';
+    if (els.missionMeta) {
+      const parts = [];
+      const timer = formatTimer(state.missionTimer);
+      if (timer) parts.push(`⏱ ${timer}`);
+      if (state.missionCheckpoints) parts.push(state.missionCheckpoints);
+      if (state.missionHint) parts.push(state.missionHint);
+      els.missionMeta.textContent = parts.join('  ·  ');
+      els.missionMeta.style.display = parts.length ? 'block' : 'none';
+    }
+    if (els.packages) {
+      els.packages.textContent = `📦 ${state.packagesCollected || 0}/${PACKAGE_COUNT}`;
+    }
+    if (els.taxi) {
+      els.taxi.style.display = state.taxiActive ? 'block' : 'none';
+      if (state.taxiActive) els.taxi.textContent = '🚕 Taxi fare — follow the marker';
+    }
     drawMinimap(state);
   }
 
-  return { showBanner, showToast, setScreen, setEnd, update };
+  return { showBanner, showToast, showSaved, setScreen, setEnd, update };
 }

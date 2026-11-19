@@ -17,6 +17,11 @@
   #mission-box { margin-top: 8px; max-width: 300px; background: rgba(10,14,24,0.72); border-left: 4px solid #facc15; border-radius: 6px; padding: 8px 10px; }
   #mission-title { font-weight: 700; font-size: 14px; letter-spacing: 0.4px; }
   #objective { font-size: 12.5px; line-height: 1.45; color: #e5e7eb; margin-top: 3px; }
+  #mission-meta { display: none; font-size: 12px; line-height: 1.45; color: #facc15; margin-top: 4px; }
+  #packages { margin-top: 8px; font-size: 13px; font-weight: 700; color: #facc15; }
+  #taxi { display: none; margin-top: 6px; font-size: 13px; font-weight: 700; color: #facc15; background: rgba(10,14,24,0.72); border-left: 4px solid #facc15; border-radius: 6px; padding: 6px 10px; max-width: 300px; }
+  #save-note { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font-size: 12px; color: #7ee787; opacity: 0; transition: opacity 0.3s; }
+  #save-note.show { opacity: 1; }
   #hud-right { position: absolute; top: 14px; right: 14px; text-align: right; }
   #money { font-size: 26px; font-weight: 800; color: #7ee787; }
   #clock { font-size: 15px; font-weight: 600; margin-top: 2px; }
@@ -24,8 +29,11 @@
   #hud-bottom { position: absolute; left: 14px; bottom: 14px; }
   #stars { font-size: 26px; letter-spacing: 3px; color: #9ca3af; }
   #stars.hot { color: #facc15; }
+  #stars.busting { animation: bustflash 0.5s steps(2) infinite; }
+  @keyframes bustflash { 50% { color: #ef4444; } }
   #health-bar { width: 220px; height: 12px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.5); border-radius: 6px; overflow: hidden; margin-top: 4px; }
   #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #22c55e, #86efac); transition: width 0.2s; }
+  #health-fill.low { background: linear-gradient(90deg, #ef4444, #fca5a5); }
   #ammo { font-size: 15px; font-weight: 700; margin-top: 6px; }
   #speed { font-size: 22px; font-weight: 800; margin-top: 2px; }
   #hint { position: absolute; bottom: 14px; right: 14px; font-size: 12px; color: rgba(255,255,255,0.75); text-align: right; line-height: 1.6; }
@@ -63,13 +71,17 @@
     <div id="mission-box">
       <div id="mission-title">Free Roam</div>
       <div id="objective">Explore Solmar Bay.</div>
+      <div id="mission-meta"></div>
     </div>
+    <div id="packages">📦 0/20</div>
+    <div id="taxi">🚕 Taxi fare — follow the marker</div>
   </div>
   <div id="hud-right">
     <div id="money">$500</div>
     <div id="clock">10:00</div>
     <button id="btn-mute">🔊 Sound: On</button>
   </div>
+  <div id="save-note">✓ Saved</div>
   <div id="hud-bottom">
     <div id="stars">☆☆☆☆☆</div>
     <div id="health-bar"><div id="health-fill"></div></div>
@@ -97,7 +109,8 @@
     <b>World:</b> Steal cars, dodge traffic, collect 20 hidden gold packages (+$100 each),
     drive a taxi for fares. Wanted stars bring the police — break line of sight to cool off.
     Getting busted or wasted costs $300 and restarts the current job.<br>
-    <b>Save:</b> progress auto-saves after every mission; Continue resumes it.
+    <b>Save:</b> progress auto-saves after every mission, package, taxi fare and pause;
+    Continue resumes ammo, health, money, wanted level, mission stage, packages and your car.
     <br><button class="menu-btn secondary" id="btn-help-back" style="width:160px">Close</button>
   </div>
   <div class="controls">WASD move &amp; drive · E enter car · F punch · Click shoot · R reload · Esc pause</div>

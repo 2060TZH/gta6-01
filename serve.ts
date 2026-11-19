@@ -38,6 +38,12 @@ const MIME: Record<string, string> = {
 };
 
 createServer((request, response) => {
+  // A static file server only serves files: anything else is a client error,
+  // not a route to fall through to the filesystem.
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    response.writeHead(405, { allow: 'GET, HEAD' }).end('method not allowed');
+    return;
+  }
   const url = new URL(request.url ?? '/', 'http://localhost');
   let pathname: string;
   try {

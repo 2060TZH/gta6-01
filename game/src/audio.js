@@ -8,6 +8,7 @@ export function createAudio() {
   let engineGain = null;
   let sirenOsc = null;
   let sirenGain = null;
+  let sirenLfo = null;
   let muted = false;
   let musicStep = 0;
 
@@ -103,6 +104,16 @@ export function createAudio() {
     noiseBurst(0.25, 0.4, 500);
   }
 
+  /** Tyre skid for handbrake drifts: filtered noise, short and quiet. */
+  function skid() {
+    noiseBurst(0.22, 0.14, 1800);
+  }
+
+  /** Short UI blip for menu clicks and toasts. */
+  function blip() {
+    tone(880, 0.06, 'sine', 0.12);
+  }
+
   function setEngine(speed01, on) {
     if (!ctx || !master) return;
     if (!on) {
@@ -142,6 +153,14 @@ export function createAudio() {
         sirenOsc = null;
         sirenGain = null;
       }
+      // v1 never stopped the LFO: every siren start added another
+      // oscillator that ran forever, piling up over a long session.
+      if (sirenLfo) {
+        try {
+          sirenLfo.stop();
+        } catch (error) {}
+        sirenLfo = null;
+      }
       return;
     }
     if (!sirenOsc) {
@@ -160,6 +179,7 @@ export function createAudio() {
       sirenGain.connect(master);
       sirenOsc.start();
       lfo.start();
+      sirenLfo = lfo;
     }
   }
 
@@ -194,6 +214,8 @@ export function createAudio() {
     missionDone,
     missionFail,
     crash,
+    skid,
+    blip,
     setEngine,
     setSiren,
     startMusic,

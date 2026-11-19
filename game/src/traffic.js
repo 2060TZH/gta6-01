@@ -18,19 +18,21 @@ export function createCarMesh(color, opts = {}) {
   group.add(cabin);
   const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.3, 10);
   const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  const wheels = [];
   for (const [wx, wz] of [[-0.95, 1.45], [0.95, 1.45], [-0.95, -1.45], [0.95, -1.45]]) {
     const wheel = new THREE.Mesh(wheelGeo, wheelMat);
     wheel.rotation.z = Math.PI / 2;
     wheel.position.set(wx, 0.36, wz);
     group.add(wheel);
+    wheels.push(wheel);
   }
-  const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff6c9 });
+  const headMat = new THREE.MeshBasicMaterial({ color: 0xfff6c9 });
   for (const hx of [-0.65, 0.65]) {
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.1), lightMat);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.1), headMat);
     head.position.set(hx, 0.62, 2.22);
     group.add(head);
   }
-  const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+  const tailMat = new THREE.MeshBasicMaterial({ color: 0x991111 });
   for (const hx of [-0.65, 0.65]) {
     const tail = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.1), tailMat);
     tail.position.set(hx, 0.62, -2.22);
@@ -51,7 +53,22 @@ export function createCarMesh(color, opts = {}) {
     group.add(bar);
     group.userData.lightBar = bar;
   }
+  // Brake lights and headlights are driven per frame (see updateDriving and
+  // the traffic update below); the materials live here so nobody has to
+  // traverse the group to find them.
+  group.userData.bodyMat = bodyMat;
+  group.userData.headMat = headMat;
+  group.userData.tailMat = tailMat;
+  group.userData.wheels = wheels;
   return group;
+}
+
+/** Set a car mesh's brake lights on or off, and its headlights for night. */
+export function setCarLights(mesh, braking, night) {
+  const tail = mesh.userData.tailMat;
+  if (tail) tail.color.setHex(braking ? 0xff2a2a : 0x991111);
+  const head = mesh.userData.headMat;
+  if (head) head.color.setHex(night ? 0xfffbe0 : 0xfff6c9);
 }
 
 const SKIN = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac];
@@ -96,40 +113,59 @@ function roadLines() {
   return lines;
 }
 
+// AI traffic stays off the two edge roads: the south edge (z = +320) is sea,
+// and the ±320 lines sit past the ground plane's edge once the lane offset
+// is added, so cars there would drive on water or off the map. The player
+// can still drive those roads; traffic just never spawns or turns onto them.
+function innerRoadLines() {
+  return roadLines().filter((l) => Math.abs(l) < CITY.half - 40);
+}
+
 export function createTraffic(scene, random, colliders) {
   const lines = roadLines();
+  const aiLines = innerRoadLines();
   const cars = [];
   const peds = [];
   const group = new THREE.Group();
   scene.add(group);
 
   function randomRoadPoint() {
-    const line = pick(random, lines);
-    const along = range(random, -CITY.half + 20, CITY.half - 20);
+    const line = pick(random, aiLines);
+    // Cap the along-road coordinate short of the sea: a car driving the
+    // north-south roads would otherwise run past the beach into the water.
+    const along = range(random, -CITY.half + 20, CITY.seaY - 10);
     return { line, along };
   }
 
-  for (let i = 0; i < TRAFFIC.cars; i += 1) {
-    const taxi = random() < 0.18;
-    const color = taxi ? 0xfacc15 : pick(random, CAR_COLORS);
+  function makeCar(taxi, color) {
     const mesh = createCarMesh(color, { taxi });
     group.add(mesh);
     const axis = random() < 0.5 ? 'x' : 'z';
     const { line, along } = randomRoadPoint();
     const dir = random() < 0.5 ? 1 : -1;
-    const car = {
+    return {
       mesh,
       axis,
       dir,
       line,
       along,
       speed: range(random, TRAFFIC.carSpeed * 0.8, TRAFFIC.carSpeed * 1.2),
+      baseSpeed: 0,
       lane: 4,
       taxi,
       color,
       driver: true,
       health: 100,
+      turnCd: 0,
+      braking: false,
     };
+  }
+
+  for (let i = 0; i < TRAFFIC.cars; i += 1) {
+    const taxi = random() < 0.18;
+    const color = taxi ? 0xfacc15 : pick(random, CAR_COLORS);
+    const car = makeCar(taxi, color);
+    car.baseSpeed = car.speed;
     cars.push(car);
   }
 
@@ -142,7 +178,7 @@ export function createTraffic(scene, random, colliders) {
       x: line + 11,
       z: along,
       targetX: line + 11,
-      targetZ: range(random, -CITY.half + 20, CITY.half - 20),
+      targetZ: range(random, -CITY.half + 20, CITY.seaY - 10),
       speed: range(random, TRAFFIC.pedSpeed * 0.8, TRAFFIC.pedSpeed * 1.3),
       walkPhase: random() * Math.PI * 2,
       fleeing: false,
@@ -160,12 +196,47 @@ export function createTraffic(scene, random, colliders) {
     return best;
   }
 
+  /** Put a traffic car back on the road after a New Game. */
+  function reset() {
+    for (const car of cars) {
+      car.stolen = false;
+      car.driver = true;
+      car.health = 100;
+      car.turnCd = 0;
+      car.speed = car.baseSpeed;
+      const { line, along } = randomRoadPoint();
+      car.axis = random() < 0.5 ? 'x' : 'z';
+      car.line = line;
+      car.along = along;
+      car.dir = random() < 0.5 ? 1 : -1;
+    }
+  }
+
+  /** Shove a traffic car aside when the player's car hits it (game.js calls this). */
+  function bumpCar(car, fromX, fromZ, force) {
+    const push = Math.max(2, Math.min(9, force));
+    // Push away from the player along the car's own road. v1 pushed along
+    // the car's driving direction, so a car driving toward the player got
+    // shoved into the player again on the next hit and pinned both cars.
+    const alongCoord = car.axis === 'x' ? fromX : fromZ;
+    const delta = car.along - alongCoord;
+    car.along += Math.sign(delta || 1) * push;
+    car.along = Math.max(-CITY.half + 10, Math.min(CITY.half - 10, car.along));
+  }
+
   function update(dt, world) {
+    const night = !!world.isNight;
+    const collide = world.collide || null;
     for (const car of cars) {
       if (car.stolen) continue; // the player is driving it now
+      car.turnCd = Math.max(0, car.turnCd - dt);
       const gap = nearestCarAhead(car);
       let speed = car.speed;
-      if (gap !== null && gap < 11) speed = Math.min(speed, Math.max(0, (gap - 6) * 1.2));
+      let braking = false;
+      if (gap !== null && gap < 11) {
+        speed = Math.min(speed, Math.max(0, (gap - 6) * 1.2));
+        braking = speed < car.speed * 0.5;
+      }
       // Slow for the player car ahead on the same lane.
       if (world.playerCar) {
         const pc = world.playerCar;
@@ -174,24 +245,39 @@ export function createTraffic(scene, random, colliders) {
         const pAlong = pAxis === 'x' ? pc.x : pc.z;
         if (pAxis === car.axis && Math.abs(pLine - car.line) < 5) {
           const pgap = (pAlong - car.along) * car.dir;
-          if (pgap > 0 && pgap < 12) speed = 0;
+          if (pgap > 0 && pgap < 12) {
+            speed = 0;
+            braking = true;
+          }
         }
       }
+      car.braking = braking;
       car.along += car.dir * speed * dt;
-      // At an intersection, sometimes turn onto the crossing road.
-      const nearLine = lines.find((l) => Math.abs(car.along - l) < speed * dt + 0.6);
-      if (nearLine !== undefined && random() < 0.3) {
-        car.along = nearLine;
+      // The south end of a north-south road is the beach: turn around at the
+      // water's edge instead of driving into the sea (v1 let cars run to z=310).
+      const alongMax = car.axis === 'z' ? CITY.seaY - 6 : CITY.half - 8;
+      // At an intersection, sometimes turn onto the crossing road — but only
+      // once per cooldown, and only while actually moving: v1 rolled the
+      // dice every frame while crossing the intersection, so cars jittered
+      // through two or three turns in a row — and a stopped car sitting
+      // exactly on a line could turn in place.
+      const nearLine = speed > 1 ? lines.find((l) => Math.abs(car.along - l) < speed * dt + 0.6) : undefined;
+      if (nearLine !== undefined && car.turnCd <= 0 && random() < 0.3) {
         const newAxis = car.axis === 'x' ? 'z' : 'x';
-        const newLine = car.line;
-        car.line = nearLine;
-        car.axis = newAxis;
-        car.dir = random() < 0.5 ? 1 : -1;
-        car.along = newLine;
+        // Never turn onto the sea road (z = +320).
+        if (!(newAxis === 'x' && nearLine >= CITY.seaY)) {
+          car.along = nearLine;
+          const newLine = car.line;
+          car.line = nearLine;
+          car.axis = newAxis;
+          car.dir = random() < 0.5 ? 1 : -1;
+          car.along = newLine;
+          car.turnCd = TRAFFIC.turnCooldown;
+        }
       }
-      if (car.along > CITY.half - 8 || car.along < -CITY.half + 8) {
+      if (car.along > alongMax || car.along < -CITY.half + 8) {
         car.dir *= -1;
-        car.along = Math.max(-CITY.half + 10, Math.min(CITY.half - 10, car.along));
+        car.along = Math.max(-CITY.half + 10, Math.min(alongMax, car.along));
       }
       const x = car.axis === 'x' ? car.along : car.line + (car.dir > 0 ? car.lane : -car.lane);
       const z = car.axis === 'z' ? car.along : car.line + (car.dir > 0 ? -car.lane : car.lane);
@@ -201,6 +287,7 @@ export function createTraffic(scene, random, colliders) {
       car.x = x;
       car.z = z;
       car.heading = heading;
+      setCarLights(car.mesh, braking, night);
     }
 
     for (const ped of peds) {
@@ -223,13 +310,25 @@ export function createTraffic(scene, random, colliders) {
       }
       if (!ped.fleeing) {
         if (dist < 1.5) {
-          const line = pick(random, lines);
+          const line = pick(random, aiLines);
           ped.targetX = line + 11;
-          ped.targetZ = range(random, -CITY.half + 20, CITY.half - 20);
+          ped.targetZ = range(random, -CITY.half + 20, CITY.seaY - 10);
         } else {
           ped.x += (dx / dist) * speed * dt;
           ped.z += (dz / dist) * speed * dt;
           ped.mesh.rotation.y = Math.atan2(dx, dz);
+        }
+      }
+      // Sidewalks end at building fronts: keep pedestrians out of walls
+      // instead of letting them clip through corners (v1 never collided).
+      if (collide) {
+        const fixed = collide(ped.x, ped.z, 0.6);
+        ped.x = fixed.x;
+        ped.z = fixed.z;
+        if (fixed.hit && !ped.fleeing) {
+          const line = pick(random, aiLines);
+          ped.targetX = line + 11;
+          ped.targetZ = range(random, -CITY.half + 20, CITY.seaY - 10);
         }
       }
       ped.walkPhase += dt * (ped.fleeing ? 14 : 7);
@@ -250,5 +349,5 @@ export function createTraffic(scene, random, colliders) {
     return cars;
   }
 
-  return { cars, peds, update, stealableCars, group };
+  return { cars, peds, update, stealableCars, reset, bumpCar, group };
 }

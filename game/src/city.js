@@ -60,6 +60,19 @@ function groundTexture(random) {
       g.fillRect(toPx(d), p - 1, 12, 2);
     }
   }
+  // Zebra crossings at every intersection (except the beach road).
+  g.fillStyle = 'rgba(255,255,255,0.85)';
+  for (let i = 0; i <= CITY.blocks; i += 1) {
+    for (let j = 0; j <= CITY.blocks; j += 1) {
+      const px = toPx(-CITY.half + i * CITY.block);
+      const pz = toPx(-CITY.half + j * CITY.block);
+      if (pz > toPx(CITY.beachY)) continue;
+      for (let k = -3; k <= 3; k += 1) {
+        g.fillRect(px + k * 4 - 1, pz - 13, 2, 11);
+        g.fillRect(px - 13, pz + k * 4 - 1, 11, 2);
+      }
+    }
+  }
   // Beach sand, then the sea at the south edge.
   g.fillStyle = '#e8cf9e';
   g.fillRect(0, toPx(CITY.beachY), S, toPx(CITY.seaY) - toPx(CITY.beachY));
@@ -144,9 +157,14 @@ export function buildCity(scene, random) {
     facadeTexture(random, '#b8c4d0', 0.18),
     facadeTexture(random, '#e0b08a', 0.3),
     facadeTexture(random, '#9fb3a8', 0.15),
+    facadeTexture(random, '#7a8ba0', 0.35),
+    facadeTexture(random, '#c9a0a0', 0.22),
   ];
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
   const roofMat = new THREE.MeshLambertMaterial({ color: 0x5a5f68 });
+  const acMat = new THREE.MeshLambertMaterial({ color: 0x8a8f96 });
+  const SHOP_SIGNS = ['HOTEL', 'CASINO', 'TACOS', 'BAR', 'PIER 9', '24H', 'NOODLES', 'GYM'];
+  let waterTowerBuilt = false;
 
   // Buildings, one to three per block. The plaza, parks, beach strip and the
   // marina/docks blocks stay open so missions have room to play out.
@@ -178,16 +196,50 @@ export function buildCity(scene, random) {
           group.add(roof);
         }
         colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
-        // Neon signs on downtown faces.
+        // Rooftop clutter: AC units on most roofs, and one water tower on the
+        // tallest downtown block so the skyline has a landmark.
+        if (random() < 0.55) {
+          const ac = new THREE.Mesh(boxGeo, acMat);
+          ac.scale.set(2.4, 1.1, 2.4);
+          ac.position.set(x + range(random, -4, 4), h + 0.55, z + range(random, -4, 4));
+          group.add(ac);
+        }
+        if (downtown && h > 44 && !waterTowerBuilt) {
+          waterTowerBuilt = true;
+          const tank = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 5, 10), new THREE.MeshLambertMaterial({ color: 0x9a7b52 }));
+          tank.position.set(x, h + 4.5, z);
+          group.add(tank);
+          const cone = new THREE.Mesh(new THREE.ConeGeometry(3.4, 2.2, 10), new THREE.MeshLambertMaterial({ color: 0x6b4f30 }));
+          cone.position.set(x, h + 8, z);
+          group.add(cone);
+          for (const [lx, lz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) {
+            const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 3.4, 6), roofMat);
+            leg.position.set(x + lx, h + 1.7, z + lz);
+            group.add(leg);
+          }
+        }
+        // Neon signs on downtown faces: a named shop sign or a plain bar.
         if (downtown && random() < 0.6) {
           const color = [PALETTE.neonPink, PALETTE.neonCyan, PALETTE.neonGold][Math.floor(random() * 3)];
-          const sign = new THREE.Mesh(
-            new THREE.BoxGeometry(8, 1.2, 0.3),
-            new THREE.MeshBasicMaterial({ color }),
-          );
-          sign.position.set(x, h * 0.75, z + d / 2 + 0.2);
-          group.add(sign);
-          neon.push(sign.material);
+          if (random() < 0.5) {
+            const word = SHOP_SIGNS[Math.floor(random() * SHOP_SIGNS.length)];
+            const fg = `#${color.toString(16).padStart(6, '0')}`;
+            const sign = new THREE.Mesh(
+              new THREE.BoxGeometry(11, 2.4, 0.3),
+              new THREE.MeshLambertMaterial({ map: textTexture(word, fg, '#101018') }),
+            );
+            sign.position.set(x, h * 0.75, z + d / 2 + 0.2);
+            group.add(sign);
+            neon.push({ mat: sign.material, base: sign.material.color.getHex() });
+          } else {
+            const sign = new THREE.Mesh(
+              new THREE.BoxGeometry(8, 1.2, 0.3),
+              new THREE.MeshBasicMaterial({ color }),
+            );
+            sign.position.set(x, h * 0.75, z + d / 2 + 0.2);
+            group.add(sign);
+            neon.push({ mat: sign.material, base: color });
+          }
         }
       }
     }
@@ -199,9 +251,15 @@ export function buildCity(scene, random) {
   for (let i = 0; i <= CITY.blocks; i += 1) {
     for (let j = 0; j <= CITY.blocks; j += 1) {
       if ((i + j) % 2 !== 0) continue;
-      const x = -CITY.half + i * CITY.block + CITY.road / 2 + 1;
-      const z = -CITY.half + j * CITY.block - CITY.road / 2 - 1;
+      // Poles sit 11 units off the road centre: the road is 8 wide and a
+      // car is 2.3 in radius, so 9 (v2's first try) wedged any car pulling
+      // out of a road-edge parking spot against the pole.
+      const x = -CITY.half + i * CITY.block + CITY.road / 2 + 3;
+      const z = -CITY.half + j * CITY.block - CITY.road / 2 - 3;
       if (z > CITY.beachY - 8) continue;
+      // Corner intersections sit past the ground plane's edge; skip them
+      // instead of planting a floating lamp off the map (v1 did exactly that).
+      if (Math.abs(x) > CITY.half - 8 || Math.abs(z) > CITY.half - 8) continue;
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 5.4, 6), lampMat);
       pole.position.set(x, 2.7, z);
       group.add(pole);
@@ -210,7 +268,89 @@ export function buildCity(scene, random) {
       bulb.position.set(x, 5.5, z);
       group.add(bulb);
       lamps.push(bulbMat);
+      // Lamp posts are solid: the player and cars stop at them now.
+      colliders.push({ minX: x - 0.25, maxX: x + 0.25, minZ: z - 0.25, maxZ: z + 0.25 });
     }
+  }
+
+  // Traffic lights at the other intersections: a pole, an arm and a
+  // red/green pair. setSignal() flips them on a timer from the game loop.
+  const signals = [];
+  const signalPoleMat = new THREE.MeshLambertMaterial({ color: 0x2f333a });
+  for (let i = 0; i <= CITY.blocks; i += 1) {
+    for (let j = 0; j <= CITY.blocks; j += 1) {
+      if ((i + j) % 2 === 0) continue;
+      const x = -CITY.half + i * CITY.block - CITY.road / 2 - 3;
+      const z = -CITY.half + j * CITY.block + CITY.road / 2 + 3;
+      if (z > CITY.beachY - 8) continue;
+      if (Math.abs(x) > CITY.half - 8 || Math.abs(z) > CITY.half - 8) continue;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 6, 6), signalPoleMat);
+      pole.position.set(x, 3, z);
+      group.add(pole);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.7, 0.7), signalPoleMat);
+      head.position.set(x, 5.6, z);
+      group.add(head);
+      const redMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+      const greenMat = new THREE.MeshBasicMaterial({ color: 0x223322 });
+      const red = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 8), redMat);
+      red.position.set(x, 6.05, z + 0.4);
+      group.add(red);
+      const green = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 8), greenMat);
+      green.position.set(x, 5.15, z + 0.4);
+      group.add(green);
+      signals.push({ redMat, greenMat });
+      colliders.push({ minX: x - 0.25, maxX: x + 0.25, minZ: z - 0.25, maxZ: z + 0.25 });
+    }
+  }
+
+  function setSignal(nsGreen) {
+    for (const s of signals) {
+      s.redMat.color.setHex(nsGreen ? 0x551111 : 0xff2a2a);
+      s.greenMat.color.setHex(nsGreen ? 0x22ff66 : 0x223322);
+    }
+  }
+
+  // Benches around the plaza and the parks, so the open blocks read as places.
+  const benchMat = new THREE.MeshLambertMaterial({ color: 0x6b4f30 });
+  const benchSpots = [
+    { x: -14, z: -6 }, { x: 14, z: -6 }, { x: -14, z: 14 }, { x: 14, z: 14 },
+    { x: -236, z: 96 }, { x: -212, z: 96 }, { x: 196, z: -216 }, { x: 220, z: -216 },
+  ];
+  for (const spot of benchSpots) {
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.28, 1.1), benchMat);
+    seat.position.set(spot.x, 0.55, spot.z);
+    group.add(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.9, 0.18), benchMat);
+    back.position.set(spot.x, 1.05, spot.z - 0.5);
+    group.add(back);
+    colliders.push({ minX: spot.x - 1.7, maxX: spot.x + 1.7, minZ: spot.z - 0.6, maxZ: spot.z + 0.6 });
+  }
+
+  // Bus stop by the plaza: a sign and a shelter roof.
+  const busSign = new THREE.Mesh(
+    new THREE.BoxGeometry(2.6, 1.2, 0.15),
+    new THREE.MeshLambertMaterial({ map: textTexture('BUS STOP', '#ffffff', '#1d4ed8') }),
+  );
+  busSign.position.set(-12, 3.4, 18);
+  group.add(busSign);
+  const busPole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 6), signalPoleMat);
+  busPole.position.set(-12, 1.7, 18);
+  group.add(busPole);
+
+  // Beach umbrellas on the sand.
+  const umbrellaColors = [0xff2e88, 0x22d3ee, 0xffc53d, 0xef4444, 0x3aa655];
+  for (let i = 0; i < 5; i += 1) {
+    const x = -200 + i * 90 + range(random, -14, 14);
+    const z = CITY.beachY + 12 + range(random, 0, 14);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.6, 6), new THREE.MeshLambertMaterial({ color: 0xe8e8e8 }));
+    pole.position.set(x, 1.3, z);
+    group.add(pole);
+    const top = new THREE.Mesh(
+      new THREE.ConeGeometry(2.4, 1.1, 8),
+      new THREE.MeshLambertMaterial({ color: umbrellaColors[i % umbrellaColors.length] }),
+    );
+    top.position.set(x, 3, z);
+    group.add(top);
   }
 
   // Palm trees on the beach.
@@ -272,10 +412,15 @@ export function buildCity(scene, random) {
     beach: { x: -40, z: 282 },
   };
 
-  function setNight(isNight) {
+  function setNight(isNight, nightFactor = 1) {
     for (const bulb of lamps) bulb.color.setHex(isNight ? 0xffe9a8 : 0x555555);
-    for (const mat of neon) mat.color.setHex(mat.color.getHex());
+    // Neon earns its keep after dark: signs glow at full colour at night and
+    // sit dimmed in daylight. v1's loop was a no-op (it re-set the same hex).
+    const glow = 0.45 + 0.55 * (isNight ? nightFactor : 0);
+    for (const entry of neon) {
+      entry.mat.color.setHex(entry.base).multiplyScalar(glow);
+    }
   }
 
-  return { group, colliders, landmarks, lamps, setNight };
+  return { group, colliders, landmarks, lamps, setNight, setSignal };
 }

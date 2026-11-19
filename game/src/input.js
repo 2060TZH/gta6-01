@@ -87,9 +87,12 @@ export function createInput(canvas) {
   }
 
   /** Drop queued presses (used when pausing, so a tap during the pause
-   * does not fire the moment play resumes). */
+   * does not fire the moment play resumes). Also drops a stale mouse
+   * delta, so the camera does not jump on resume. */
   function clearPressed() {
     justPressed.clear();
+    state.mouseDX = 0;
+    state.mouseDY = 0;
   }
 
   function dispose() {

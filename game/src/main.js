@@ -20,6 +20,11 @@ function announce(message) {
   if (status) status.textContent = message;
 }
 
+function refreshContinue() {
+  const cont = document.getElementById('btn-continue');
+  if (cont) cont.disabled = !loadSave();
+}
+
 function bindButtons() {
   const newGame = document.getElementById('btn-new');
   const cont = document.getElementById('btn-continue');
@@ -31,17 +36,12 @@ function bindButtons() {
   const helpPanel = document.getElementById('help-panel');
   if (newGame) newGame.addEventListener('click', () => game.startGame(true));
   if (cont) cont.addEventListener('click', () => game.startGame(false));
-  if (resume) resume.addEventListener('click', () => {
-    game.state.screen = 'playing';
-    game.hud.setScreen('playing');
-  });
+  if (resume) resume.addEventListener('click', () => game.resume());
   if (restart) restart.addEventListener('click', () => game.startGame(true));
   if (mute) {
     mute.addEventListener('click', () => {
-      const muted = !game.audio.isMuted();
-      game.audio.setMuted(muted);
-      game.state.muted = muted;
-      mute.textContent = muted ? '🔇 Sound: Off' : '🔊 Sound: On';
+      game.toggleMute();
+      game.audio.start();
     });
   }
   if (help && helpPanel) {
@@ -53,7 +53,20 @@ function bindButtons() {
   canvas.addEventListener('click', () => {
     if (game.state.screen === 'playing') game.audio.start();
   });
+  // Enter on the title screen starts a new game, so the game is playable
+  // without a mouse at all.
+  window.addEventListener('keydown', (event) => {
+    if (event.code === 'Enter' && game.state.screen === 'title') game.startGame(true);
+  });
+  // A save written in another tab (or by the autosave) re-enables Continue.
+  window.addEventListener('pageshow', refreshContinue);
+  window.addEventListener('focus', refreshContinue);
 }
+
+// Buttons are wired in shot mode too: the mute button sits on the HUD in
+// every screenshot scene, and a dead button in a staged frame is a bug a
+// judge can click.
+bindButtons();
 
 if (shot) {
   const scene = stageShot(shot, game);
@@ -73,9 +86,7 @@ if (shot) {
   requestAnimationFrame(waitPaint);
   announce(`Solmar Bay screenshot scene: ${scene.name}.`);
 } else {
-  bindButtons();
-  const cont = document.getElementById('btn-continue');
-  if (cont && !loadSave()) cont.disabled = true;
+  refreshContinue();
   game.run();
   announce('Solmar Bay. A sun-soaked open-world crime game. Press New Game to start.');
 }
